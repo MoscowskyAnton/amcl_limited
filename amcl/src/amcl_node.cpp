@@ -53,6 +53,8 @@
 #include "nav_msgs/SetMap.h"
 #include "std_srvs/Empty.h"
 
+#include "amcl/SetLimits.h"
+
 // For transform support
 #include "tf2/LinearMath/Transform.h"
 #include "tf2/convert.h"
@@ -159,6 +161,7 @@ class AmclNode
     // Pose-generating function used to uniformly distribute particles over
     // the map
     static pf_vector_t uniformPoseGenerator(void* arg);
+    static pf_vector_t uniformPoseGeneratorInLimits(void* arg);
 #if NEW_UNIFORM_SAMPLING
     static std::vector<std::pair<int,int> > free_space_indices;
 #endif
@@ -169,6 +172,8 @@ class AmclNode
                                     std_srvs::Empty::Response& res);
     bool setMapCallback(nav_msgs::SetMap::Request& req,
                         nav_msgs::SetMap::Response& res);
+    bool setLimitsCallback(amcl::SetLimits::Request& req,
+                        amcl::SetLimits::Response& res);    
 
     void laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan);
     void initialPoseReceived(const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg);
@@ -253,6 +258,7 @@ class AmclNode
     ros::ServiceServer global_loc_srv_;
     ros::ServiceServer nomotion_update_srv_; //to let amcl update samples without requiring motion
     ros::ServiceServer set_map_srv_;
+    ros::ServiceServer set_limits_srv_;
     ros::Subscriber initial_pose_sub_old_;
     ros::Subscriber map_sub_;
 
@@ -481,6 +487,8 @@ AmclNode::AmclNode() :
                                          this);
   nomotion_update_srv_= nh_.advertiseService("request_nomotion_update", &AmclNode::nomotionUpdateCallback, this);
   set_map_srv_= nh_.advertiseService("set_map", &AmclNode::setMapCallback, this);
+  
+  set_limits_srv_ = nh_.advertiseService("set_limits", &AmclNode::setLimitsCallback, this);
 
   laser_scan_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(nh_, scan_topic_, 100);
   laser_scan_filter_ = 
@@ -1085,6 +1093,7 @@ AmclNode::uniformPoseGenerator(void* arg)
   return p;
 }
 
+
 bool
 AmclNode::globalLocalizationCallback(std_srvs::Empty::Request& req,
                                      std_srvs::Empty::Response& res)
@@ -1099,6 +1108,38 @@ AmclNode::globalLocalizationCallback(std_srvs::Empty::Request& req,
   ROS_INFO("Global initialisation done!");
   pf_init_ = false;
   return true;
+}
+
+pf_vector_t 
+AmclNode::uniformPoseGeneratorInLimits(void* arg)
+{
+    amcl::SetLimits::Request* limits = (amcl::SetLimits::Request*)arg;
+    pf_vector_t p;
+    for(;;)
+    {
+        p.v[0] = limits->min_x + drand48() * (limits->max_x - limits->min_x);
+        p.v[1] = limits->min_y + drand48() * (limits->max_y - limits->min_y);
+        p.v[2] = limits->min_y + drand48() * (limits->max_Y - limits->min_Y);
+        // Check that it's a free cell
+//         int i,j;
+//         i = MAP_GXWX(map, p.v[0]);
+//         j = MAP_GYWY(map, p.v[1]);
+//         if(MAP_VALID(map,i,j) && (map->cells[MAP_INDEX(map,i,j)].occ_state == -1))
+         break;
+        
+    }
+    return p;
+}
+
+bool 
+AmclNode::setLimitsCallback(amcl::SetLimits::Request& req,
+                            amcl::SetLimits::Response& res)
+{
+    boost::recursive_mutex::scoped_lock gl(configuration_mutex_);
+    pf_init_model(pf_, (pf_init_model_fn_t)AmclNode::uniformPoseGeneratorInLimits,
+                (void*)&req);
+    pf_init_ = false;
+    return true;
 }
 
 // force nomotion updates (amcl updating without requiring motion)
