@@ -488,7 +488,7 @@ AmclNode::AmclNode() :
   nomotion_update_srv_= nh_.advertiseService("request_nomotion_update", &AmclNode::nomotionUpdateCallback, this);
   set_map_srv_= nh_.advertiseService("set_map", &AmclNode::setMapCallback, this);
   
-  set_limits_srv_ = nh_.advertiseService("set_limits", &AmclNode::setLimitsCallback, this);
+  set_limits_srv_ = private_nh_.advertiseService("set_limits", &AmclNode::setLimitsCallback, this);
 
   laser_scan_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(nh_, scan_topic_, 100);
   laser_scan_filter_ = 
@@ -1135,6 +1135,8 @@ bool
 AmclNode::setLimitsCallback(amcl::SetLimits::Request& req,
                             amcl::SetLimits::Response& res)
 {
+    if( req.min_x > req.max_x || req.min_y > req.max_y || req.min_Y > req.max_Y)
+        return false;
     boost::recursive_mutex::scoped_lock gl(configuration_mutex_);
     pf_init_model(pf_, (pf_init_model_fn_t)AmclNode::uniformPoseGeneratorInLimits,
                 (void*)&req);
