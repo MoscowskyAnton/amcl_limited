@@ -29,6 +29,11 @@ generate_dynamic_reconfigure_options(
     cfg/AMCL.cfg
 )
 
+add_message_files(
+  FILES
+  Limit.msg
+)
+
 add_service_files(
   FILES
   SetLimits.srv

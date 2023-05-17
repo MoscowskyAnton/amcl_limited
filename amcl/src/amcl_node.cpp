@@ -54,6 +54,7 @@
 #include "std_srvs/Empty.h"
 
 #include "amcl/SetLimits.h"
+#include "amcl/Limit.h"
 
 // For transform support
 #include "tf2/LinearMath/Transform.h"
@@ -96,6 +97,7 @@ typedef struct
 
 } amcl_hyp_t;
 
+
 static double
 normalize(double z)
 {
@@ -130,6 +132,95 @@ std::string stripSlash(const std::string& in)
     out.erase(0,1);
   return out;
 }
+
+class CoordLimit
+{
+  public:
+    CoordLimit(const Limit& limit_msg)
+    {
+        x_min = limit_msg.min_x;
+        x_max = limit_msg.max_x;
+        y_min = limit_msg.min_y;
+        y_max = limit_msg.max_y;
+        Y_min = limit_msg.min_Y;
+        Y_max = limit_msg.max_Y;
+    }
+    
+    double pseudo_size(){
+        return (x_max - x_min) * (y_max - y_min) * (Y_max - Y_min);
+    }
+    
+    pf_vector_t get_random_pose(){
+        pf_vector_t p;
+        p.v[0] = x_min + drand48() * x_max - x_min;
+        p.v[1] = y_min + drand48() * y_max - y_min;
+        p.v[2] = Y_min + drand48() * Y_max - Y_min;
+    }
+    
+  private:
+    double x_max, x_min;
+    double y_max, y_min;
+    double Y_max, Y_min;
+    
+};
+
+
+class LimitsHandler
+{
+  public: 
+    LimitsHandler(const SetLimits::Request& req, map_t* map)
+    {
+        double total_size = 0;
+        for( const auto& lim: req.limits ){
+            limits.push_back(CoordLimit(lim));
+            double size = limits.back().pseudo_size();
+            sizes.push_back(size);
+            total_size += size;
+        }
+        for (auto& size: sizes){            
+            size /= total_size;
+        }
+        map_ = map;
+    }
+    
+    size_t get_random_index(){
+        if( limits.size() == 1 ){
+            return 0;
+        }
+        else{
+            double die_roll = drand48();
+            double sum = 0;
+            for(size_t i = 0 ; i < sizes.size(); i++ ){
+                sum += sizes[i];
+                if( sum > die_roll )
+                    return i;
+            }
+            return sizes.size() - 1;
+        }
+    }
+    
+    pf_vector_t get_random_pose(){
+        
+        pf_vector_t p;        
+        for(;;){
+            size_t index = get_random_index(); 
+            p = limits[index].get_random_pose();
+            
+            int i,j;
+            i = MAP_GXWX(map_, p.v[0]);
+            j = MAP_GYWY(map_, p.v[1]);
+            if(MAP_VALID(map_,i,j) && (map_->cells[MAP_INDEX(map_,i,j)].occ_state == -1))
+                break;
+        }
+    }
+        
+
+  private:
+    std::vector<CoordLimit> limits;    
+    std::vector<double> sizes;
+    double total_size;
+    map_t* map_;
+};
 
 class AmclNode
 {
@@ -1117,9 +1208,9 @@ AmclNode::uniformPoseGeneratorInLimits(void* arg)
     pf_vector_t p;
     for(;;)
     {
-        p.v[0] = limits->min_x + drand48() * (limits->max_x - limits->min_x);
-        p.v[1] = limits->min_y + drand48() * (limits->max_y - limits->min_y);
-        p.v[2] = limits->min_y + drand48() * (limits->max_Y - limits->min_Y);
+//         p.v[0] = limits->min_x + drand48() * (limits->max_x - limits->min_x);
+//         p.v[1] = limits->min_y + drand48() * (limits->max_y - limits->min_y);
+//         p.v[2] = limits->min_y + drand48() * (limits->max_Y - limits->min_Y);
         // Check that it's a free cell
 //         int i,j;
 //         i = MAP_GXWX(map, p.v[0]);
@@ -1135,8 +1226,8 @@ bool
 AmclNode::setLimitsCallback(amcl::SetLimits::Request& req,
                             amcl::SetLimits::Response& res)
 {
-    if( req.min_x > req.max_x || req.min_y > req.max_y || req.min_Y > req.max_Y)
-        return false;
+//     if( req.min_x > req.max_x || req.min_y > req.max_y || req.min_Y > req.max_Y)
+//         return false;
     boost::recursive_mutex::scoped_lock gl(configuration_mutex_);
     pf_init_model(pf_, (pf_init_model_fn_t)AmclNode::uniformPoseGeneratorInLimits,
                 (void*)&req);
