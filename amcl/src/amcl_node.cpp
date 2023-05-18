@@ -52,7 +52,8 @@
 #include "nav_msgs/GetMap.h"
 #include "nav_msgs/SetMap.h"
 #include "std_srvs/Empty.h"
-
+#include "visualization_msgs/Marker.h"
+#include "geometry_msgs/Point.h"
 #include "amcl/SetLimits.h"
 #include "amcl/Limit.h"
 
@@ -136,6 +137,17 @@ std::string stripSlash(const std::string& in)
 class CoordLimit
 {
   public:
+    
+    CoordLimit(double min_x, double max_x, double min_y, double max_y, double min_Y, double max_Y)
+    {
+        x_min = min_x;
+        x_max = max_x;
+        y_min = min_y;
+        y_max = max_y;
+        Y_min = min_Y;
+        Y_max = max_Y;
+    }
+      
     CoordLimit(const Limit& limit_msg)
     {
         x_min = limit_msg.min_x;
@@ -155,12 +167,13 @@ class CoordLimit
         p.v[0] = x_min + drand48() * x_max - x_min;
         p.v[1] = y_min + drand48() * y_max - y_min;
         p.v[2] = Y_min + drand48() * Y_max - Y_min;
+        return p;
     }
-    
-  private:
+      
     double x_max, x_min;
     double y_max, y_min;
     double Y_max, Y_min;
+  private:
     
 };
 
@@ -168,6 +181,22 @@ class CoordLimit
 class LimitsHandler
 {
   public: 
+      
+    LimitsHandler(){}
+    
+    LimitsHandler(map_t* map)
+    {
+        double min_x, max_x, min_y, max_y;
+        
+        min_x = map->origin_x - (map->size_x * map->scale)/2;
+        max_x = (map->size_x * map->scale)/2 + map->origin_x;
+        min_y = map->origin_y - (map->size_x * map->scale)/2;
+        max_y = (map->size_y * map->scale)/2 + map->origin_y;
+        
+        limits.push_back(CoordLimit(min_x, max_x, min_y, max_y, -M_PI, M_PI));        
+        map_ = map;
+    }
+      
     LimitsHandler(const SetLimits::Request& req, map_t* map)
     {
         double total_size = 0;
@@ -184,6 +213,10 @@ class LimitsHandler
     }
     
     size_t get_random_index(){
+        if( limits.size() == 0 ){
+            ROS_ERROR("Limits are not initialized! Exit.");
+            exit(-1);
+        }
         if( limits.size() == 1 ){
             return 0;
         }
@@ -200,10 +233,9 @@ class LimitsHandler
     }
     
     pf_vector_t get_random_pose(){
-        
-        pf_vector_t p;        
+        pf_vector_t p;
         for(;;){
-            size_t index = get_random_index(); 
+            size_t index = get_random_index();
             p = limits[index].get_random_pose();
             
             int i,j;
@@ -212,8 +244,18 @@ class LimitsHandler
             if(MAP_VALID(map_,i,j) && (map_->cells[MAP_INDEX(map_,i,j)].occ_state == -1))
                 break;
         }
+        return p;
     }
-        
+    
+    size_t size(){ return limits.size();}
+    
+    CoordLimit at(int index)
+    {
+        if (index >= size()) {            
+            exit(0);
+        }
+        return limits[index];
+    }
 
   private:
     std::vector<CoordLimit> limits;    
@@ -276,6 +318,8 @@ class AmclNode
     map_t* convertMap( const nav_msgs::OccupancyGrid& map_msg );
     void updatePoseFromServer();
     void applyInitialPose();
+    
+    void publishLimitsMarkers();
 
     //parameter for which odom to use
     std::string odom_frame_id_;
@@ -346,6 +390,8 @@ class AmclNode
     ros::NodeHandle private_nh_;
     ros::Publisher pose_pub_;
     ros::Publisher particlecloud_pub_;
+    ros::Publisher limitsmarker_pub_;
+
     ros::ServiceServer global_loc_srv_;
     ros::ServiceServer nomotion_update_srv_; //to let amcl update samples without requiring motion
     ros::ServiceServer set_map_srv_;
@@ -390,6 +436,8 @@ class AmclNode
     ros::Time last_laser_received_ts_;
     ros::Duration laser_check_interval_;
     void checkLaserReceived(const ros::TimerEvent& event);
+    
+    LimitsHandler* limits_handler;
 };
 
 #if NEW_UNIFORM_SAMPLING
@@ -576,6 +624,9 @@ AmclNode::AmclNode() :
   global_loc_srv_ = nh_.advertiseService("global_localization", 
 					 &AmclNode::globalLocalizationCallback,
                                          this);
+  limitsmarker_pub_ = private_nh_.advertise<visualization_msgs::Marker>( "limits", 2, true);
+  
+  
   nomotion_update_srv_= nh_.advertiseService("request_nomotion_update", &AmclNode::nomotionUpdateCallback, this);
   set_map_srv_= nh_.advertiseService("set_map", &AmclNode::setMapCallback, this);
   
@@ -599,6 +650,8 @@ AmclNode::AmclNode() :
     requestMap();
   }
   m_force_update = false;
+  
+  limits_handler = NULL;
 
   dsrv_ = new dynamic_reconfigure::Server<amcl::AMCLConfig>(ros::NodeHandle("~"));
   dynamic_reconfigure::Server<amcl::AMCLConfig>::CallbackType cb = boost::bind(&AmclNode::reconfigureCB, this, _1, _2);
@@ -996,6 +1049,12 @@ AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
   frame_to_laser_.clear();
 
   map_ = convertMap(msg);
+  
+  // init limits
+  if( limits_handler == NULL ){
+      limits_handler = new LimitsHandler(map_);
+      publishLimitsMarkers();
+  }
 
 #if NEW_UNIFORM_SAMPLING
   // Index of free space
@@ -1194,8 +1253,10 @@ AmclNode::globalLocalizationCallback(std_srvs::Empty::Request& req,
   }
   boost::recursive_mutex::scoped_lock gl(configuration_mutex_);
   ROS_INFO("Initializing with uniform distribution");
-  pf_init_model(pf_, (pf_init_model_fn_t)AmclNode::uniformPoseGenerator,
-                (void *)map_);
+//   pf_init_model(pf_, (pf_init_model_fn_t)AmclNode::uniformPoseGenerator,
+//                 (void *)map_);
+  pf_init_model(pf_, (pf_init_model_fn_t)AmclNode::uniformPoseGeneratorInLimits,
+                (void*)limits_handler);
   ROS_INFO("Global initialisation done!");
   pf_init_ = false;
   return true;
@@ -1204,21 +1265,9 @@ AmclNode::globalLocalizationCallback(std_srvs::Empty::Request& req,
 pf_vector_t 
 AmclNode::uniformPoseGeneratorInLimits(void* arg)
 {
-    amcl::SetLimits::Request* limits = (amcl::SetLimits::Request*)arg;
+    LimitsHandler* limits_handler = (LimitsHandler*)arg;
     pf_vector_t p;
-    for(;;)
-    {
-//         p.v[0] = limits->min_x + drand48() * (limits->max_x - limits->min_x);
-//         p.v[1] = limits->min_y + drand48() * (limits->max_y - limits->min_y);
-//         p.v[2] = limits->min_y + drand48() * (limits->max_Y - limits->min_Y);
-        // Check that it's a free cell
-//         int i,j;
-//         i = MAP_GXWX(map, p.v[0]);
-//         j = MAP_GYWY(map, p.v[1]);
-//         if(MAP_VALID(map,i,j) && (map->cells[MAP_INDEX(map,i,j)].occ_state == -1))
-         break;
-        
-    }
+    limits_handler->get_random_pose();
     return p;
 }
 
@@ -1226,12 +1275,17 @@ bool
 AmclNode::setLimitsCallback(amcl::SetLimits::Request& req,
                             amcl::SetLimits::Response& res)
 {
-//     if( req.min_x > req.max_x || req.min_y > req.max_y || req.min_Y > req.max_Y)
-//         return false;
-    boost::recursive_mutex::scoped_lock gl(configuration_mutex_);
-    pf_init_model(pf_, (pf_init_model_fn_t)AmclNode::uniformPoseGeneratorInLimits,
-                (void*)&req);
-    pf_init_ = false;
+    if( map_ == NULL ){
+        res.result = false;
+    }
+    
+    limits_handler = new LimitsHandler(req, map_);
+//     boost::recursive_mutex::scoped_lock gl(configuration_mutex_);
+//     pf_init_model(pf_, (pf_init_model_fn_t)AmclNode::uniformPoseGeneratorInLimits,
+//                 (void*)limits_handler);
+//     pf_init_ = false;
+    res.result = true;
+    publishLimitsMarkers();
     return true;
 }
 
@@ -1787,4 +1841,59 @@ AmclNode::standardDeviationDiagnostics(diagnostic_updater::DiagnosticStatusWrapp
   {
     diagnostic_status.summary(diagnostic_msgs::DiagnosticStatus::OK, "OK");
   }
+}
+  
+void
+AmclNode::publishLimitsMarkers()
+{
+    ros::Time now = ros::Time::now();
+    if( limits_handler != NULL ){
+        for(size_t i = 0 ; i < limits_handler->size() ; i++ ){
+            
+            // AREA
+            visualization_msgs::Marker marker_area;
+            
+            marker_area.header.frame_id = "map";
+            marker_area.header.stamp = now;
+            
+            marker_area.id = i;
+            marker_area.ns = "area";
+            marker_area.type = visualization_msgs::Marker::LINE_STRIP;
+            marker_area.action = visualization_msgs::Marker::ADD;
+            
+            marker_area.scale.x = 0.05;
+            marker_area.pose.orientation.w = 1;
+            marker_area.color.a = 1;
+            marker_area.color.r = 1;
+            
+            geometry_msgs::Point nn;
+            nn.x = limits_handler->at(i).x_min;
+            nn.y = limits_handler->at(i).y_min;
+            marker_area.points.push_back(nn);
+            
+            geometry_msgs::Point xn;
+            xn.x = limits_handler->at(i).x_max;
+            xn.y = limits_handler->at(i).y_min;
+            marker_area.points.push_back(xn);
+            
+            geometry_msgs::Point xx;
+            xx.x = limits_handler->at(i).x_max;
+            xx.y = limits_handler->at(i).y_max;
+            marker_area.points.push_back(xx);
+            
+            geometry_msgs::Point nx;
+            nx.x = limits_handler->at(i).x_min;
+            nx.y = limits_handler->at(i).y_max;
+            marker_area.points.push_back(nx);
+            marker_area.points.push_back(nn);
+            
+//             marker_area.points.push_back(geometry_msgs::Point(limits_handler[i].x_min, limits_handler[i].y_max, 0.));
+//             marker_area.points.push_back(geometry_msgs::Point(limits_handler[i].x_max, limits_handler[i].y_max, 0.));
+//             marker_area.points.push_back(geometry_msgs::Point(limits_handler[i].x_max, limits_handler[i].y_min, 0.));
+//             marker_area.points.push_back(geometry_msgs::Point(limits_handler[i].x_min, limits_handler[i].y_min, 0.));
+            
+            limitsmarker_pub_.publish(marker_area);
+        }
+        
+    }
 }
