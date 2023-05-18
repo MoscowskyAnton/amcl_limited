@@ -1434,6 +1434,13 @@ AmclNode::laserReceived(const sensor_msgs::LaserScanConstPtr& laser_scan)
 
     // Use the action data to update the filter
     odom_->UpdateAction(pf_, (AMCLSensorData*)&odata);
+    
+    // HERE I CAN CHECK LIMITS!!!
+    // HERE I CAN CHECK LIMITS!!!
+    // HERE I CAN CHECK LIMITS!!!
+    // HERE I CAN CHECK LIMITS!!!
+    // HERE I CAN CHECK LIMITS!!!
+    // HERE I CAN CHECK LIMITS!!!
 
     // Pose at last filter update
     //this->pf_odom_pose = pose;
@@ -1854,7 +1861,7 @@ AmclNode::publishLimitsMarkers()
             // AREA
             visualization_msgs::Marker marker_area;
             
-            marker_area.header.frame_id = "map";
+            marker_area.header.frame_id = global_frame_id_;
             marker_area.header.stamp = now;
             
             marker_area.id = i;
@@ -1893,7 +1900,7 @@ AmclNode::publishLimitsMarkers()
             // DIRECTION
             visualization_msgs::Marker marker_dir;
             
-            marker_dir.header.frame_id = "map";
+            marker_dir.header.frame_id = global_frame_id_;
             marker_dir.header.stamp = now;
             marker_dir.id = i;
             marker_dir.ns = "direction";
@@ -1923,7 +1930,7 @@ AmclNode::publishLimitsMarkers()
         // delete extras
         for( int i = limits_handler->size() ; i < previous_markers_len ; i++ ){
             visualization_msgs::Marker marker_area;            
-            marker_area.header.frame_id = "map";
+            marker_area.header.frame_id = global_frame_id_;
             marker_area.header.stamp = now;            
             marker_area.id = i;
             marker_area.ns = "area";
@@ -1931,7 +1938,7 @@ AmclNode::publishLimitsMarkers()
             limitsmarker_pub_.publish(marker_area);
             
             visualization_msgs::Marker marker_dir;            
-            marker_dir.header.frame_id = "map";
+            marker_dir.header.frame_id = global_frame_id_;
             marker_dir.header.stamp = now;            
             marker_dir.id = i;
             marker_dir.ns = "direction";
