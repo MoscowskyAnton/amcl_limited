@@ -320,7 +320,8 @@ class AmclNode
     void applyInitialPose();
     
     void publishLimitsMarkers();
-
+    int previous_markers_len = 0;
+    
     //parameter for which odom to use
     std::string odom_frame_id_;
 
@@ -1887,13 +1888,56 @@ AmclNode::publishLimitsMarkers()
             marker_area.points.push_back(nx);
             marker_area.points.push_back(nn);
             
-//             marker_area.points.push_back(geometry_msgs::Point(limits_handler[i].x_min, limits_handler[i].y_max, 0.));
-//             marker_area.points.push_back(geometry_msgs::Point(limits_handler[i].x_max, limits_handler[i].y_max, 0.));
-//             marker_area.points.push_back(geometry_msgs::Point(limits_handler[i].x_max, limits_handler[i].y_min, 0.));
-//             marker_area.points.push_back(geometry_msgs::Point(limits_handler[i].x_min, limits_handler[i].y_min, 0.));
-            
             limitsmarker_pub_.publish(marker_area);
+            
+            // DIRECTION
+            visualization_msgs::Marker marker_dir;
+            
+            marker_dir.header.frame_id = "map";
+            marker_dir.header.stamp = now;
+            marker_dir.id = i;
+            marker_dir.ns = "direction";
+            marker_dir.type = visualization_msgs::Marker::LINE_STRIP;
+            marker_dir.action = visualization_msgs::Marker::ADD;
+            
+            marker_dir.scale.x = 0.05;
+            marker_dir.pose.orientation.w = 1;
+            marker_dir.pose.position.x = (limits_handler->at(i).x_min + limits_handler->at(i).x_max)/2;
+            marker_dir.pose.position.y = (limits_handler->at(i).y_min + limits_handler->at(i).y_max)/2;
+            marker_dir.color.a = 1;
+            marker_dir.color.r = 1;
+            
+            geometry_msgs::Point l;
+            l.x = 0.5 * cos(limits_handler->at(i).Y_min);
+            l.y = 0.5 * sin(limits_handler->at(i).Y_min);
+            marker_dir.points.push_back(l);
+            marker_dir.points.push_back(geometry_msgs::Point());
+            geometry_msgs::Point r;
+            r.x = 0.5 * cos(limits_handler->at(i).Y_max);
+            r.y = 0.5 * sin(limits_handler->at(i).Y_max);
+            marker_dir.points.push_back(r);
+            
+            limitsmarker_pub_.publish(marker_dir);                                    
+            
         }
-        
+        // delete extras
+        for( int i = limits_handler->size() ; i < previous_markers_len ; i++ ){
+            visualization_msgs::Marker marker_area;            
+            marker_area.header.frame_id = "map";
+            marker_area.header.stamp = now;            
+            marker_area.id = i;
+            marker_area.ns = "area";
+            marker_area.action = visualization_msgs::Marker::DELETE;
+            limitsmarker_pub_.publish(marker_area);
+            
+            visualization_msgs::Marker marker_dir;            
+            marker_dir.header.frame_id = "map";
+            marker_dir.header.stamp = now;            
+            marker_dir.id = i;
+            marker_dir.ns = "direction";
+            marker_dir.action = visualization_msgs::Marker::DELETE;
+            limitsmarker_pub_.publish(marker_dir);
+        }
+        previous_markers_len = limits_handler->size();
     }
 }
