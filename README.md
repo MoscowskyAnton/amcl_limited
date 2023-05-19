@@ -1,6 +1,6 @@
 # AMCL limited
 This is fork from [original](https://github.com/ros-planning/navigation) ROS repository of navigation stack, but here is removed everything except [AMCL-method](http://wiki.ros.org/amcl).  
-AMCL is being changed in a way, that on every step limits of particle can be set.
+AMCL is being changed in a way, that limits of particle can be set, to exclude some zones from possibility to localize in.
 
 Limits are set as min and max values of x, y and yaw variables. Such set of variables can be repeated as much as needed. When global localization is called, particles can appear only inside of this sets. Also when resapling is done for filter, new particles also will appear inside of this sets. Probability of appeariance is depend of areas cumulative size.  
 Now started limit contains full map size for x and y and \[-pi, pi] range for yaw.
