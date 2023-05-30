@@ -244,6 +244,7 @@ class LimitsHandler
             if(MAP_VALID(map_,i,j) && (map_->cells[MAP_INDEX(map_,i,j)].occ_state == -1))
                 break;
         }
+        //printf("%f %f %f\n",p.v[0], p.v[1], p.v[2]);        
         return p;
     }
     
@@ -1267,8 +1268,7 @@ pf_vector_t
 AmclNode::uniformPoseGeneratorInLimits(void* arg)
 {
     LimitsHandler* limits_handler = (LimitsHandler*)arg;
-    pf_vector_t p;
-    limits_handler->get_random_pose();
+    pf_vector_t p = limits_handler->get_random_pose();
     return p;
 }
 
@@ -1935,6 +1935,7 @@ AmclNode::publishLimitsMarkers()
             marker_area.id = i;
             marker_area.ns = "area";
             marker_area.action = visualization_msgs::Marker::DELETE;
+            marker_area.type = visualization_msgs::Marker::LINE_STRIP;
             limitsmarker_pub_.publish(marker_area);
             
             visualization_msgs::Marker marker_dir;            
@@ -1943,6 +1944,7 @@ AmclNode::publishLimitsMarkers()
             marker_dir.id = i;
             marker_dir.ns = "direction";
             marker_dir.action = visualization_msgs::Marker::DELETE;
+            marker_dir.type = visualization_msgs::Marker::LINE_STRIP;
             limitsmarker_pub_.publish(marker_dir);
         }
         previous_markers_len = limits_handler->size();
